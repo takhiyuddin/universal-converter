@@ -1,6 +1,6 @@
 # Universal File Converter
 
-![Project Banner]([https://via.placeholder.com/1200x600/050505/ffffff?text=Universal+File+Converter](https://lite-switch.vercel.app)
+![Project Banner](https://lite-switch.vercel.app/1200x600/050505/ffffff?text=Universal+File+Converter)
 
 > A modern, unlimited, and privacy-focused file converter built with Next.js 14. Convert images, audio, video, and documents directly in your browser.
 
