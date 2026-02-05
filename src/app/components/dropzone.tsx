@@ -13,11 +13,12 @@ import {
     Music as MusicIcon,
     FileText as FileIcon,
     Trash2,
+    Download,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { cn } from "../utils/utils";
+import { cn } from "@/utils/utils";
 
-// Tipe Kategori
+// --- TIPE DATA ---
 type CategoryType = "image" | "video" | "audio" | "document";
 
 type FileState = {
@@ -26,9 +27,11 @@ type FileState = {
     category: CategoryType;
     targetFormat: string;
     status: "idle" | "converting" | "done" | "error";
+    resultUrl?: string; // URL untuk download hasil
 };
 
-// Helper: Deteksi kategori berdasarkan MIME type
+// --- HELPER FUNCTIONS ---
+
 const getCategory = (file: File): CategoryType => {
     if (file.type.startsWith("image/")) return "image";
     if (file.type.startsWith("video/")) return "video";
@@ -36,18 +39,16 @@ const getCategory = (file: File): CategoryType => {
     return "document";
 };
 
-// Helper: Opsi format convert berdasarkan kategori
 const getFormatOptions = (category: CategoryType) => {
     switch (category) {
-        case "image": return ["png", "jpg", "webp", "svg"];
-        case "video": return ["mp4", "mkv", "gif", "avi"];
-        case "audio": return ["mp3", "wav", "aac"];
-        case "document": return ["pdf", "docx", "txt"];
+        case "image": return ["png", "jpeg", "webp"];
+        case "video": return ["mp4", "webm"]; // Browser safe only
+        case "audio": return ["mp3", "wav"];
+        case "document": return ["pdf", "txt"];
         default: return [];
     }
 };
 
-// Helper: Icon & Label untuk Header Kategori
 const categoryConfig = {
     image: { label: "Images", icon: ImageIcon, color: "text-purple-400" },
     video: { label: "Videos", icon: VideoIcon, color: "text-blue-400" },
@@ -59,6 +60,100 @@ export default function Dropzone() {
     const [files, setFiles] = useState<FileState[]>([]);
     const [isHover, setIsHover] = useState(false);
 
+    // --- LOGIKA UTAMA KONVERSI ---
+
+    // 1. Fungsi Konversi Gambar Nyata (Real Logic)
+    const convertImage = async (file: File, format: string): Promise<Blob> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement("canvas");
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext("2d");
+                    if (!ctx) return reject("Canvas error");
+
+                    // Gambar ke canvas
+                    ctx.drawImage(img, 0, 0);
+
+                    // Export ke format baru
+                    // mimeType: image/png, image/jpeg, image/webp
+                    const mimeType = `image/${format === 'jpg' ? 'jpeg' : format}`;
+
+                    canvas.toBlob((blob) => {
+                        if (blob) resolve(blob);
+                        else reject("Conversion failed");
+                    }, mimeType, 0.9); // 0.9 quality
+                };
+                img.src = event.target?.result as string;
+            };
+            reader.readAsDataURL(file);
+        });
+    };
+
+    // 2. Fungsi Download Otomatis
+    const downloadFile = (blob: Blob, fileName: string) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    // 3. Handler Start Conversion
+    const startConversion = async () => {
+        const updatedFiles = files.map((f) => ({ ...f, status: "converting" as const }));
+        setFiles(updatedFiles);
+
+        // Proses setiap file
+        const newFileStates = [...updatedFiles];
+
+        for (let i = 0; i < newFileStates.length; i++) {
+            const currentFile = newFileStates[i];
+
+            try {
+                let resultBlob: Blob;
+
+                // Cek kategori untuk menentukan metode
+                if (currentFile.category === "image") {
+                    // GUNAKAN REAL CONVERSION UNTUK GAMBAR
+                    resultBlob = await convertImage(currentFile.file, currentFile.targetFormat);
+                } else {
+                    // UNTUK VIDEO/AUDIO/DOCS (Simulasi Download untuk Demo)
+                    // Karena butuh backend/FFMPEG wasm yg berat
+                    await new Promise((resolve) => setTimeout(resolve, 1500)); // Delay simulasi
+                    resultBlob = currentFile.file; // Return file asli (hanya rename ekstensi nanti)
+                }
+
+                // Trigger Auto Download
+                const newFileName = currentFile.file.name.replace(/\.[^/.]+$/, "") + "." + currentFile.targetFormat;
+                downloadFile(resultBlob, newFileName);
+
+                // Update status UI jadi Done
+                setFiles((prev) =>
+                    prev.map((f) =>
+                        f.id === currentFile.id ? { ...f, status: "done" } : f
+                    )
+                );
+
+            } catch (error) {
+                console.error("Error converting file:", error);
+                setFiles((prev) =>
+                    prev.map((f) =>
+                        f.id === currentFile.id ? { ...f, status: "error" } : f
+                    )
+                );
+            }
+        }
+    };
+
+    // --- EVENT HANDLERS ---
+
     const handleDrop = (acceptedFiles: File[]) => {
         const newFiles = acceptedFiles.map((file) => {
             const category = getCategory(file);
@@ -66,7 +161,7 @@ export default function Dropzone() {
                 file,
                 id: Math.random().toString(36).substring(7),
                 category,
-                targetFormat: getFormatOptions(category)[0], // Default format pertama
+                targetFormat: getFormatOptions(category)[0],
                 status: "idle" as const,
             };
         });
@@ -78,22 +173,6 @@ export default function Dropzone() {
         setFiles((prev) => prev.filter((f) => f.id !== id));
     };
 
-    const startConversion = async () => {
-        const updatedFiles = files.map((f) => ({ ...f, status: "converting" as const }));
-        setFiles(updatedFiles);
-
-        // Simulasi convert per file
-        for (let i = 0; i < files.length; i++) {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            setFiles((prev) =>
-                prev.map((f, index) =>
-                    index === i ? { ...f, status: "done" as const } : f
-                )
-            );
-        }
-    };
-
-    // Group files by category untuk rendering
     const groupedFiles = {
         image: files.filter((f) => f.category === "image"),
         video: files.filter((f) => f.category === "video"),
@@ -101,8 +180,10 @@ export default function Dropzone() {
         document: files.filter((f) => f.category === "document"),
     };
 
+    // --- RENDER ---
+
     return (
-        <div className="w-full max-w-4xl mx-auto pb-20">
+        <div className="w-full max-w-4xl mx-auto pb-32">
             {/* 1. AREA UPLOAD */}
             <ReactDropzone
                 onDrop={handleDrop}
@@ -158,7 +239,7 @@ export default function Dropzone() {
                                 </div>
                             </div>
 
-                            {/* List File dalam Kategori */}
+                            {/* List File */}
                             <div className="p-2 space-y-1">
                                 <AnimatePresence>
                                     {categoryFiles.map((fileState) => (
@@ -190,7 +271,7 @@ export default function Dropzone() {
                                                     <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-lg border border-neutral-800">
                                                         <span className="text-xs text-neutral-500 uppercase font-bold">To</span>
                                                         <select
-                                                            className="bg-transparent text-neutral-200 text-sm font-medium focus:outline-none cursor-pointer"
+                                                            className="bg-transparent text-neutral-200 text-sm font-medium focus:outline-none cursor-pointer appearance-none pr-4"
                                                             value={fileState.targetFormat}
                                                             onChange={(e) => {
                                                                 setFiles((prev) =>
@@ -220,8 +301,12 @@ export default function Dropzone() {
 
                                                 {fileState.status === "done" && (
                                                     <span className="flex items-center gap-1.5 text-xs text-emerald-500 font-medium bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
-                                                        <CheckCircle2 className="h-3.5 w-3.5" /> Converted
+                                                        <CheckCircle2 className="h-3.5 w-3.5" /> Downloaded
                                                     </span>
+                                                )}
+
+                                                {fileState.status === "error" && (
+                                                    <span className="text-xs text-red-500 font-medium">Failed</span>
                                                 )}
 
                                                 {fileState.status === "idle" && (
@@ -243,7 +328,7 @@ export default function Dropzone() {
             </div>
 
             {/* 3. TOMBOL CONVERT GLOBAL */}
-            {files.length > 0 && (
+            {files.length > 0 && files.some(f => f.status !== 'done') && (
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -257,14 +342,14 @@ export default function Dropzone() {
                         {files.some((f) => f.status === "converting") ? (
                             <>
                                 <Loader2 className="animate-spin h-5 w-5" />
-                                <span>Converting {files.length} Files...</span>
+                                <span>Converting...</span>
                             </>
                         ) : (
                             <>
                                 <div className="bg-black text-white p-1 rounded-full">
                                     <ArrowRight className="h-4 w-4" />
                                 </div>
-                                <span>Convert All Files</span>
+                                <span>Convert & Download All</span>
                             </>
                         )}
                     </button>
